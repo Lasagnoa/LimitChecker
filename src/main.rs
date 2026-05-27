@@ -283,14 +283,27 @@ unsafe fn remove_tray_icon(hwnd: HWND) {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
-/// Calculate popup height for four usage rows.
-fn calc_popup_height(_info: &UsageInfo) -> i32 {
-    let provider_h = TITLE_ROW_H
+/// 1プロバイダー分のセクション高さ (タイトル + 5H行 + 7D行)
+fn provider_section_h() -> i32 {
+    TITLE_ROW_H
         + TITLE_BAR_GAP
         + (BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H)
         + BLOCK_GAP
-        + (BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H);
-    PAD + provider_h * 2 + BLOCK_GAP + PAD
+        + (BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H)
+}
+
+/// 設定済みプロバイダーの数に応じてポップアップ高さを計算する
+fn calc_popup_height(info: &UsageInfo) -> i32 {
+    let sec_h = provider_section_h();
+    let claude_h = if info.claude_configured { sec_h } else { 0 };
+    let codex_h = if info.codex_configured { sec_h } else { 0 };
+    // 両方表示する場合はセクション間に BLOCK_GAP を追加
+    let gap = if info.claude_configured && info.codex_configured { BLOCK_GAP } else { 0 };
+    // どちらも未設定なら最低限の高さ (メッセージ表示用)
+    if !info.claude_configured && !info.codex_configured {
+        return PAD + BAR_ROW_H + PAD;
+    }
+    PAD + claude_h + gap + codex_h + PAD
 }
 
 unsafe fn show_popup(_hwnd: HWND) {
@@ -793,65 +806,64 @@ unsafe extern "system" fn popup_wnd_proc(
 
             let mut cy = PAD;
 
-            draw_title_row(hdc, cy, "Claude", COL_CLAUDE, title_font);
-            cy += TITLE_ROW_H + TITLE_BAR_GAP;
+            // Claude セクション (トークンが見つかった場合のみ表示)
+            if info_clone.claude_configured {
+                draw_title_row(hdc, cy, "Claude", COL_CLAUDE, title_font);
+                cy += TITLE_ROW_H + TITLE_BAR_GAP;
 
-            draw_bar_row(
-                hdc,
-                cy,
-                "5H",
-                info_clone.claude.session_pct,
-                COL_CLAUDE,
-                bold_font,
-            );
-            cy += BAR_ROW_H + BAR_DETAIL_GAP;
-            if let Some(ref reset) = info_clone.claude.session_resets_at {
-                draw_detail_row(hdc, cy, reset, detail_font);
+                draw_bar_row(hdc, cy, "5H", info_clone.claude.session_pct, COL_CLAUDE, bold_font);
+                cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                if let Some(ref reset) = info_clone.claude.session_resets_at {
+                    draw_detail_row(hdc, cy, reset, detail_font);
+                }
+                cy += DETAIL_ROW_H + BLOCK_GAP;
+
+                draw_bar_row(hdc, cy, "7D", info_clone.claude.weekly_pct, COL_CLAUDE, bold_font);
+                cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                if let Some(ref reset) = info_clone.claude.weekly_resets_at {
+                    draw_detail_row(hdc, cy, reset, detail_font);
+                }
+                cy += DETAIL_ROW_H;
+
+                // Codex も表示する場合はセクション間ギャップを追加
+                if info_clone.codex_configured {
+                    cy += BLOCK_GAP;
+                }
             }
-            cy += DETAIL_ROW_H + BLOCK_GAP;
 
-            draw_bar_row(
-                hdc,
-                cy,
-                "7D",
-                info_clone.claude.weekly_pct,
-                COL_CLAUDE,
-                bold_font,
-            );
-            cy += BAR_ROW_H + BAR_DETAIL_GAP;
-            if let Some(ref reset) = info_clone.claude.weekly_resets_at {
-                draw_detail_row(hdc, cy, reset, detail_font);
+            // Codex セクション (トークンが見つかった場合のみ表示)
+            if info_clone.codex_configured {
+                draw_title_row(hdc, cy, "Codex", COL_CODEX, title_font);
+                cy += TITLE_ROW_H + TITLE_BAR_GAP;
+
+                draw_bar_row(hdc, cy, "5H", info_clone.codex.session_pct, COL_CODEX, bold_font);
+                cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                if let Some(ref reset) = info_clone.codex.session_resets_at {
+                    draw_detail_row(hdc, cy, reset, detail_font);
+                }
+                cy += DETAIL_ROW_H + BLOCK_GAP;
+
+                draw_bar_row(hdc, cy, "7D", info_clone.codex.weekly_pct, COL_CODEX, bold_font);
+                cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                if let Some(ref reset) = info_clone.codex.weekly_resets_at {
+                    draw_detail_row(hdc, cy, reset, detail_font);
+                }
+                let _ = cy;
             }
-            cy += DETAIL_ROW_H + BLOCK_GAP;
 
-            draw_title_row(hdc, cy, "Codex", COL_CODEX, title_font);
-            cy += TITLE_ROW_H + TITLE_BAR_GAP;
-
-            draw_bar_row(
-                hdc,
-                cy,
-                "5H",
-                info_clone.codex.session_pct,
-                COL_CODEX,
-                bold_font,
-            );
-            cy += BAR_ROW_H + BAR_DETAIL_GAP;
-            if let Some(ref reset) = info_clone.codex.session_resets_at {
-                draw_detail_row(hdc, cy, reset, detail_font);
-            }
-            cy += DETAIL_ROW_H + BLOCK_GAP;
-
-            draw_bar_row(
-                hdc,
-                cy,
-                "7D",
-                info_clone.codex.weekly_pct,
-                COL_CODEX,
-                bold_font,
-            );
-            cy += BAR_ROW_H + BAR_DETAIL_GAP;
-            if let Some(ref reset) = info_clone.codex.weekly_resets_at {
-                draw_detail_row(hdc, cy, reset, detail_font);
+            // 両方未設定の場合はメッセージを表示
+            if !info_clone.claude_configured && !info_clone.codex_configured {
+                SelectObject(hdc, bold_font as _);
+                SetTextColor(hdc, COL_WHITE);
+                let msg = to_wide("ログインが必要です");
+                let mut msg_rc = RECT {
+                    left: PAD,
+                    top: PAD,
+                    right: POPUP_W - PAD,
+                    bottom: PAD + BAR_ROW_H,
+                };
+                DrawTextW(hdc, msg.as_ptr(), -1, &mut msg_rc,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             }
 
             // エラーはポップアップに表示せずログファイルにのみ出力する

@@ -22,10 +22,26 @@ impl Default for ProviderUsage {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct UsageInfo {
     pub claude: ProviderUsage,
+    /// Claude のトークンが見つかり使用率取得が可能かどうか
+    pub claude_configured: bool,
     pub codex: ProviderUsage,
+    /// Codex のトークンが見つかり使用率取得が可能かどうか
+    pub codex_configured: bool,
+}
+
+impl Default for UsageInfo {
+    fn default() -> Self {
+        Self {
+            claude: ProviderUsage::default(),
+            // 初回ポーリング完了までは両方表示を維持する
+            claude_configured: true,
+            codex: ProviderUsage::default(),
+            codex_configured: true,
+        }
+    }
 }
 
 pub type SharedUsageInfo = Arc<Mutex<UsageInfo>>;
@@ -67,7 +83,10 @@ pub fn poll_once(shared: &SharedUsageInfo) {
     let client = build_client();
     let previous = shared.lock().unwrap().clone();
 
-    let claude = match credentials::read_claude_auth() {
+    // Claude: トークン種別を先に確認してから取得
+    let claude_auth = credentials::read_claude_auth();
+    let claude_configured = matches!(claude_auth, Some(credentials::ClaudeAuth::BearerToken(_)));
+    let claude = match claude_auth {
         Some(credentials::ClaudeAuth::BearerToken(token)) => fetch_claude_usage(&client, &token)
             .unwrap_or_else(|e| {
                 write_log(&format!("Claude usage failed: {}", e));
@@ -83,7 +102,10 @@ pub fn poll_once(shared: &SharedUsageInfo) {
         }
     };
 
-    let codex = match credentials::read_codex_token() {
+    // Codex: トークンの有無を先に確認してから取得
+    let codex_token = credentials::read_codex_token();
+    let codex_configured = codex_token.is_some();
+    let codex = match codex_token {
         Some(token) => fetch_codex_usage(&client, &token).unwrap_or_else(|e| {
             write_log(&format!("Codex usage failed: {}", e));
             previous.codex.clone()
@@ -96,7 +118,9 @@ pub fn poll_once(shared: &SharedUsageInfo) {
 
     let mut info = shared.lock().unwrap();
     info.claude = claude;
+    info.claude_configured = claude_configured;
     info.codex = codex;
+    info.codex_configured = codex_configured;
 }
 
 fn fetch_claude_usage(
