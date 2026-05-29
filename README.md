@@ -1,3 +1,6 @@
+[日本語](#limitchecker-ja) | [English](#limitchecker-en)
+
+<a id="limitchecker-ja"></a>
 # LimitChecker
 
 Claude Code と Codex CLI のレートリミット使用状況を Windows タスクトレイからリアルタイムで確認できるデスクトップアプリです。
@@ -59,7 +62,7 @@ Claude Code と Codex CLI のレートリミット使用状況を Windows タス
 - Windows SDK
 
 ```powershell
-git clone https://github.com/Lasagnoa/LimitChecker.git
+git clone [https://github.com/Lasagnoa/LimitChecker.git](https://github.com/Lasagnoa/LimitChecker.git)
 cd LimitChecker
 cargo build --release
 ```
@@ -116,3 +119,125 @@ MIT License
 ## 技術的な詳細
 
 詳細な仕様は [SPECIFICATION_JA.md](SPECIFICATION_JA.md) を参照してください。
+
+---
+
+<a id="limitchecker-en"></a>
+# LimitChecker (English)
+
+A desktop application that allows you to check the rate limit usage of Claude Code and Codex CLI in real-time from the Windows task tray.
+
+## Screenshot
+
+Check the usage rate in a popup by hovering or left-clicking the tray icon.
+
+![Screenshot](Screenshot.png)
+
+## Features
+
+- Real-time display of Claude Code's 5-hour and 7-day rate limit usage
+- Real-time display of Codex CLI's 5-hour and 7-day rate limit usage
+- Intuitive visual bars in segment format to grasp usage rates easily
+- Displays remaining time until reset in local time
+- Selectable update intervals: 1 min / 5 min / 15 min / 60 min
+- Resides in the task tray for constant monitoring
+- Prevents multiple instances
+
+## Requirements
+
+| Item | Details |
+|------|---------|
+| OS | Windows 10 / Windows 11 |
+| Language | Rust |
+| Claude Auth | Claude Code's OAuth / Bearer token |
+| Codex Auth | `.codex/auth.json` created by Codex CLI |
+
+## Prerequisites
+
+One of the following is required.
+
+**Required for Claude usage display:**
+
+- [Claude Code](https://claude.ai/code) is installed and logged in
+  - `%USERPROFILE%\.claude\.credentials.json` or `ANTHROPIC_AUTH_TOKEN` environment variable is valid
+
+**Required for Codex usage display:**
+
+- [Codex CLI](https://github.com/openai/codex) is installed and logged in via `codex login`
+  - `%USERPROFILE%\.codex\auth.json` exists
+
+> **Note:** Usage rates cannot be retrieved with standard `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. OAuth authentication for Claude Code / Codex CLI is required.
+
+## Installation
+
+### Using pre-built binaries
+
+Download the latest `LimitChecker.exe` from [Releases](../../releases) and run it.
+
+Place `icon.ico` in the same folder as `LimitChecker.exe` to use a custom icon.
+
+### Building from source
+
+**Requirements:**
+
+- [Rust](https://www.rust-lang.org/tools/install) (rustup recommended)
+- Windows SDK
+
+```powershell
+git clone [https://github.com/Lasagnoa/LimitChecker.git](https://github.com/Lasagnoa/LimitChecker.git)
+cd LimitChecker
+cargo build --release
+```
+
+Build artifact:
+
+```
+target\release\LimitChecker.exe
+```
+
+## Usage
+
+1. Run `LimitChecker.exe` to keep it in the task tray
+2. Hover or left-click the tray icon to show the popup
+3. Right-click to open the menu
+
+### Right-click Menu
+
+| Item | Action |
+|------|--------|
+| Update Now | Immediately fetch Claude and Codex usage |
+| Update Interval | 1 min / 5 min / 15 min / 60 min |
+| Open Claude.ai | Open `https://claude.ai` in default browser |
+| Open ChatGPT | Open `https://chatgpt.com/` in default browser |
+| Claude Re-login | Execute `claude auth login` |
+| Codex Re-login | Execute `codex login` |
+| Log (Debug) | Toggle `limitchecker.log` output |
+| Exit | Exit the application |
+
+### Settings File
+
+Settings are saved automatically:
+
+```
+%APPDATA%\LimitChecker\settings.json
+```
+
+## Troubleshooting
+
+**If usage is 0% or not displayed:**
+
+- Check if you are logged into Claude Code or Codex CLI
+- Try "Claude Re-login" or "Codex Re-login" from the right-click menu
+- Enable "Log (Debug)" from the right-click menu and check `limitchecker.log` in the same folder as the `exe`
+
+**Authentication in WSL environment:**
+
+Token files for Claude Code / Codex CLI inside WSL are also searched automatically.
+
+## License
+
+MIT License
+
+## Technical Details
+
+See [SPECIFICATION_EN.md](SPECIFICATION_EN.md) for detailed specifications.
