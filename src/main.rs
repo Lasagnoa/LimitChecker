@@ -8,6 +8,7 @@ use poller::{SharedUsageInfo, UsageInfo};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
+use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::*;
@@ -96,6 +97,77 @@ fn app() -> &'static mut AppState {
 
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiLanguage {
+    Japanese,
+    English,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum TextId {
+    RefreshNow,
+    IntervalMenu,
+    Interval1Min,
+    Interval5Min,
+    Interval15Min,
+    Interval60Min,
+    OpenClaude,
+    OpenChatGpt,
+    LoginClaude,
+    LoginCodex,
+    DebugLog,
+    Exit,
+    LoginRequired,
+    Reset,
+}
+
+fn ui_language() -> UiLanguage {
+    // LANGID lower 10 bits are the primary language ID. Japanese is 0x11.
+    let lang_id = unsafe { GetUserDefaultUILanguage() };
+    if (lang_id & 0x03ff) == 0x11 {
+        UiLanguage::Japanese
+    } else {
+        UiLanguage::English
+    }
+}
+
+fn tr(id: TextId) -> &'static str {
+    match ui_language() {
+        UiLanguage::Japanese => match id {
+            TextId::RefreshNow => "今すぐ更新",
+            TextId::IntervalMenu => "更新間隔",
+            TextId::Interval1Min => "1分",
+            TextId::Interval5Min => "5分",
+            TextId::Interval15Min => "15分",
+            TextId::Interval60Min => "60分",
+            TextId::OpenClaude => "Claude.aiを開く",
+            TextId::OpenChatGpt => "ChatGPTを開く",
+            TextId::LoginClaude => "Claude再ログイン",
+            TextId::LoginCodex => "Codex再ログイン",
+            TextId::DebugLog => "ログ(デバッグ用)",
+            TextId::Exit => "終了",
+            TextId::LoginRequired => "ログインが必要です",
+            TextId::Reset => "リセット",
+        },
+        UiLanguage::English => match id {
+            TextId::RefreshNow => "Refresh now",
+            TextId::IntervalMenu => "Update interval",
+            TextId::Interval1Min => "1 min",
+            TextId::Interval5Min => "5 min",
+            TextId::Interval15Min => "15 min",
+            TextId::Interval60Min => "60 min",
+            TextId::OpenClaude => "Open Claude.ai",
+            TextId::OpenChatGpt => "Open ChatGPT",
+            TextId::LoginClaude => "Log in to Claude again",
+            TextId::LoginCodex => "Log in to Codex again",
+            TextId::DebugLog => "Log (debug)",
+            TextId::Exit => "Exit",
+            TextId::LoginRequired => "Login required",
+            TextId::Reset => "Reset",
+        },
+    }
 }
 
 fn exe_dir() -> std::path::PathBuf {
@@ -298,7 +370,11 @@ fn calc_popup_height(info: &UsageInfo) -> i32 {
     let claude_h = if info.claude_configured { sec_h } else { 0 };
     let codex_h = if info.codex_configured { sec_h } else { 0 };
     // 両方表示する場合はセクション間に BLOCK_GAP を追加
-    let gap = if info.claude_configured && info.codex_configured { BLOCK_GAP } else { 0 };
+    let gap = if info.claude_configured && info.codex_configured {
+        BLOCK_GAP
+    } else {
+        0
+    };
     // どちらも未設定なら最低限の高さ (メッセージ表示用)
     if !info.claude_configured && !info.codex_configured {
         return PAD + BAR_ROW_H + PAD;
@@ -402,7 +478,7 @@ unsafe fn show_context_menu(hwnd: HWND) {
         hmenu,
         MF_STRING,
         IDM_REFRESH as usize,
-        to_wide("今すぐ更新").as_ptr(),
+        to_wide(tr(TextId::RefreshNow)).as_ptr(),
     );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
 
@@ -419,53 +495,58 @@ unsafe fn show_context_menu(hwnd: HWND) {
         hsub,
         check(60_000),
         IDM_INTERVAL_1 as usize,
-        to_wide("1分").as_ptr(),
+        to_wide(tr(TextId::Interval1Min)).as_ptr(),
     );
     AppendMenuW(
         hsub,
         check(5 * 60_000),
         IDM_INTERVAL_5 as usize,
-        to_wide("5分").as_ptr(),
+        to_wide(tr(TextId::Interval5Min)).as_ptr(),
     );
     AppendMenuW(
         hsub,
         check(15 * 60_000),
         IDM_INTERVAL_15 as usize,
-        to_wide("15分").as_ptr(),
+        to_wide(tr(TextId::Interval15Min)).as_ptr(),
     );
     AppendMenuW(
         hsub,
         check(60 * 60_000),
         IDM_INTERVAL_60 as usize,
-        to_wide("60分").as_ptr(),
+        to_wide(tr(TextId::Interval60Min)).as_ptr(),
     );
-    AppendMenuW(hmenu, MF_POPUP, hsub as usize, to_wide("更新間隔").as_ptr());
+    AppendMenuW(
+        hmenu,
+        MF_POPUP,
+        hsub as usize,
+        to_wide(tr(TextId::IntervalMenu)).as_ptr(),
+    );
 
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
     AppendMenuW(
         hmenu,
         MF_STRING,
         IDM_OPEN_CLAUDE as usize,
-        to_wide("Claude.aiを開く").as_ptr(),
+        to_wide(tr(TextId::OpenClaude)).as_ptr(),
     );
     AppendMenuW(
         hmenu,
         MF_STRING,
         IDM_OPEN_CODEX as usize,
-        to_wide("ChatGPTを開く").as_ptr(),
+        to_wide(tr(TextId::OpenChatGpt)).as_ptr(),
     );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
     AppendMenuW(
         hmenu,
         MF_STRING,
         IDM_LOGIN_CLAUDE as usize,
-        to_wide("Claude再ログイン").as_ptr(),
+        to_wide(tr(TextId::LoginClaude)).as_ptr(),
     );
     AppendMenuW(
         hmenu,
         MF_STRING,
         IDM_LOGIN_CODEX as usize,
-        to_wide("Codex再ログイン").as_ptr(),
+        to_wide(tr(TextId::LoginCodex)).as_ptr(),
     );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
     // デバッグログ ON/OFF (チェックマークで状態を表示)
@@ -478,14 +559,14 @@ unsafe fn show_context_menu(hwnd: HWND) {
         hmenu,
         log_flag,
         IDM_LOG_TOGGLE as usize,
-        to_wide("ログ(デバッグ用)").as_ptr(),
+        to_wide(tr(TextId::DebugLog)).as_ptr(),
     );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
     AppendMenuW(
         hmenu,
         MF_STRING,
         IDM_EXIT as usize,
-        to_wide("終了").as_ptr(),
+        to_wide(tr(TextId::Exit)).as_ptr(),
     );
 
     let mut pt: POINT = std::mem::zeroed();
@@ -749,7 +830,7 @@ unsafe fn draw_detail_row(
     SetTextColor(hdc, COL_WHITE);
     let countdown = poller::format_reset_countdown(reset);
     let reset_local = poller::format_reset_local(reset);
-    let detail_text = format!("{} ( Reset : {} )", countdown, reset_local);
+    let detail_text = format!("{} ( {} : {} )", countdown, tr(TextId::Reset), reset_local);
     let wide = to_wide(&detail_text);
     let mut rc = RECT {
         left: DETAIL_X,
@@ -811,14 +892,28 @@ unsafe extern "system" fn popup_wnd_proc(
                 draw_title_row(hdc, cy, "Claude", COL_CLAUDE, title_font);
                 cy += TITLE_ROW_H + TITLE_BAR_GAP;
 
-                draw_bar_row(hdc, cy, "5H", info_clone.claude.session_pct, COL_CLAUDE, bold_font);
+                draw_bar_row(
+                    hdc,
+                    cy,
+                    "5H",
+                    info_clone.claude.session_pct,
+                    COL_CLAUDE,
+                    bold_font,
+                );
                 cy += BAR_ROW_H + BAR_DETAIL_GAP;
                 if let Some(ref reset) = info_clone.claude.session_resets_at {
                     draw_detail_row(hdc, cy, reset, detail_font);
                 }
                 cy += DETAIL_ROW_H + BLOCK_GAP;
 
-                draw_bar_row(hdc, cy, "7D", info_clone.claude.weekly_pct, COL_CLAUDE, bold_font);
+                draw_bar_row(
+                    hdc,
+                    cy,
+                    "7D",
+                    info_clone.claude.weekly_pct,
+                    COL_CLAUDE,
+                    bold_font,
+                );
                 cy += BAR_ROW_H + BAR_DETAIL_GAP;
                 if let Some(ref reset) = info_clone.claude.weekly_resets_at {
                     draw_detail_row(hdc, cy, reset, detail_font);
@@ -836,14 +931,28 @@ unsafe extern "system" fn popup_wnd_proc(
                 draw_title_row(hdc, cy, "Codex", COL_CODEX, title_font);
                 cy += TITLE_ROW_H + TITLE_BAR_GAP;
 
-                draw_bar_row(hdc, cy, "5H", info_clone.codex.session_pct, COL_CODEX, bold_font);
+                draw_bar_row(
+                    hdc,
+                    cy,
+                    "5H",
+                    info_clone.codex.session_pct,
+                    COL_CODEX,
+                    bold_font,
+                );
                 cy += BAR_ROW_H + BAR_DETAIL_GAP;
                 if let Some(ref reset) = info_clone.codex.session_resets_at {
                     draw_detail_row(hdc, cy, reset, detail_font);
                 }
                 cy += DETAIL_ROW_H + BLOCK_GAP;
 
-                draw_bar_row(hdc, cy, "7D", info_clone.codex.weekly_pct, COL_CODEX, bold_font);
+                draw_bar_row(
+                    hdc,
+                    cy,
+                    "7D",
+                    info_clone.codex.weekly_pct,
+                    COL_CODEX,
+                    bold_font,
+                );
                 cy += BAR_ROW_H + BAR_DETAIL_GAP;
                 if let Some(ref reset) = info_clone.codex.weekly_resets_at {
                     draw_detail_row(hdc, cy, reset, detail_font);
@@ -855,15 +964,20 @@ unsafe extern "system" fn popup_wnd_proc(
             if !info_clone.claude_configured && !info_clone.codex_configured {
                 SelectObject(hdc, bold_font as _);
                 SetTextColor(hdc, COL_WHITE);
-                let msg = to_wide("ログインが必要です");
+                let msg = to_wide(tr(TextId::LoginRequired));
                 let mut msg_rc = RECT {
                     left: PAD,
                     top: PAD,
                     right: POPUP_W - PAD,
                     bottom: PAD + BAR_ROW_H,
                 };
-                DrawTextW(hdc, msg.as_ptr(), -1, &mut msg_rc,
-                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+                DrawTextW(
+                    hdc,
+                    msg.as_ptr(),
+                    -1,
+                    &mut msg_rc,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
+                );
             }
 
             // エラーはポップアップに表示せずログファイルにのみ出力する
