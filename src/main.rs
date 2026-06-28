@@ -5,7 +5,7 @@ mod poller;
 mod settings;
 
 use poller::{SharedUsageInfo, UsageInfo};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
@@ -36,6 +36,7 @@ static POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
 static POPUP_PINNED: AtomicBool = AtomicBool::new(false);
 pub static LOG_ENABLED: AtomicBool = AtomicBool::new(false);
 static MAIN_HWND: AtomicUsize = AtomicUsize::new(0);
+static TASKBAR_CREATED_MSG: AtomicU32 = AtomicU32::new(0);
 static LAST_TRAY_MOUSEMOVE_MS: AtomicU64 = AtomicU64::new(0);
 static CLICK_CURSOR_X: AtomicUsize = AtomicUsize::new(0);
 static CLICK_CURSOR_Y: AtomicUsize = AtomicUsize::new(0);
@@ -221,6 +222,8 @@ fn main() {
 
     unsafe {
         let hinstance = GetModuleHandleW(std::ptr::null());
+        let taskbar_created = RegisterWindowMessageW(to_wide("TaskbarCreated").as_ptr());
+        TASKBAR_CREATED_MSG.store(taskbar_created, Ordering::SeqCst);
 
         let class_name = to_wide("LimitCheckerClass");
         let wc = WNDCLASSW {
@@ -609,6 +612,10 @@ unsafe extern "system" fn wnd_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     match msg {
+        m if m != 0 && m == TASKBAR_CREATED_MSG.load(Ordering::SeqCst) => {
+            add_tray_icon(hwnd);
+            0
+        }
         WM_TRAYICON => {
             let event = (lparam & 0xFFFF) as u32;
             match event {

@@ -79,6 +79,10 @@ fn build_client() -> reqwest::blocking::Client {
         .unwrap()
 }
 
+fn limitchecker_user_agent() -> String {
+    format!("LimitChecker/{}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn poll_once(shared: &SharedUsageInfo) {
     let client = build_client();
     let previous = shared.lock().unwrap().clone();
@@ -127,7 +131,120 @@ fn fetch_claude_usage(
     client: &reqwest::blocking::Client,
     token: &str,
 ) -> Result<ProviderUsage, String> {
-    write_log("Claude usage fetch started");
+    fetch_claude_oauth_usage(client, token).or_else(|e| {
+        write_log(&format!(
+            "Claude OAuth usage API failed, falling back to Messages API: {}",
+            e
+        ));
+        fetch_claude_messages_usage(client, token)
+    })
+}
+
+fn fetch_claude_oauth_usage(
+    client: &reqwest::blocking::Client,
+    token: &str,
+) -> Result<ProviderUsage, String> {
+    write_log("Claude OAuth usage fetch started");
+    let resp = client
+        .get("https://api.anthropic.com/api/oauth/usage")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("anthropic-beta", "oauth-2025-04-20")
+        .header("accept", "application/json")
+        .header("user-agent", limitchecker_user_agent())
+        .send()
+        .map_err(|e| format!("OAuth usage API request failed: {}", e))?;
+
+    let status = resp.status();
+    write_log(&format!("Claude OAuth usage API status: {}", status));
+
+    if !status.is_success() {
+        let body_text = resp.text().unwrap_or_default();
+        write_log(&format!(
+            "Claude OAuth usage API HTTP {}: {}",
+            status, body_text
+        ));
+        return Err(format!("OAuth usage API HTTP {}", status));
+    }
+
+    let usage = resp
+        .json::<serde_json::Value>()
+        .map_err(|e| format!("OAuth usage API JSON parse failed: {}", e))?;
+
+    let parsed = parse_claude_oauth_usage(&usage);
+    write_log(&format!(
+        "Claude OAuth usage fetched: 5h={:.1}%, weekly={:.1}%",
+        parsed.session_pct, parsed.weekly_pct
+    ));
+
+    Ok(parsed)
+}
+
+fn parse_claude_oauth_usage(usage: &serde_json::Value) -> ProviderUsage {
+    let session = usage.get("five_hour");
+    let weekly = best_claude_weekly_window(usage);
+
+    ProviderUsage {
+        session_pct: oauth_window_pct(session),
+        session_resets_at: oauth_window_reset(session),
+        weekly_pct: weekly.map_or(0.0, |(_, window)| oauth_window_pct(Some(window))),
+        weekly_resets_at: weekly.and_then(|(_, window)| oauth_window_reset(Some(window))),
+    }
+}
+
+fn best_claude_weekly_window(
+    usage: &serde_json::Value,
+) -> Option<(&'static str, &serde_json::Value)> {
+    if let Some(window) = usage.get("seven_day") {
+        return Some(("seven_day", window));
+    }
+
+    [
+        "seven_day_opus",
+        "seven_day_sonnet",
+        "seven_day_haiku",
+        "seven_day_oauth_apps",
+    ]
+    .into_iter()
+    .filter_map(|name| usage.get(name).map(|window| (name, window)))
+    .max_by(|(_, a), (_, b)| {
+        oauth_window_pct(Some(a))
+            .partial_cmp(&oauth_window_pct(Some(b)))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
+}
+
+fn oauth_window_pct(window: Option<&serde_json::Value>) -> f64 {
+    window
+        .and_then(|v| {
+            v.get("utilization")
+                .or_else(|| v.get("used_percent"))
+                .or_else(|| v.get("percent"))
+        })
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite())
+        .unwrap_or(0.0)
+        .max(0.0)
+}
+
+fn oauth_window_reset(window: Option<&serde_json::Value>) -> Option<DateTime<Utc>> {
+    let value = window.and_then(|v| {
+        v.get("resets_at")
+            .or_else(|| v.get("reset_at"))
+            .or_else(|| v.get("resetAt"))
+    })?;
+
+    if let Some(ts) = value.as_i64() {
+        return DateTime::from_timestamp(ts, 0).map(|dt| dt.with_timezone(&Utc));
+    }
+
+    value.as_str().and_then(parse_timestamp)
+}
+
+fn fetch_claude_messages_usage(
+    client: &reqwest::blocking::Client,
+    token: &str,
+) -> Result<ProviderUsage, String> {
+    write_log("Claude Messages usage fetch started");
     let body = serde_json::json!({
         "model": "claude-haiku-4-5-20251001",
         "max_tokens": 1,
@@ -196,7 +313,7 @@ fn fetch_codex_usage(
         .get("https://chatgpt.com/backend-api/wham/usage")
         .header("Authorization", format!("Bearer {}", token))
         .header("accept", "application/json")
-        .header("user-agent", "LimitChecker/0.1.0")
+        .header("user-agent", limitchecker_user_agent())
         .send()
         .map_err(|e| format!("Codex usage API request failed: {}", e))?;
 
@@ -402,5 +519,39 @@ mod tests {
     fn parses_epoch_and_rfc3339_timestamps() {
         assert!(parse_timestamp("1765944000").is_some());
         assert!(parse_timestamp("2026-04-28T12:34:56Z").is_some());
+    }
+
+    #[test]
+    fn parses_claude_oauth_usage_windows() {
+        let usage = serde_json::json!({
+            "five_hour": {
+                "utilization": 17.5,
+                "resets_at": "2026-04-28T12:34:56Z"
+            },
+            "seven_day": {
+                "utilization": 42.25,
+                "resets_at": 1765944000
+            }
+        });
+
+        let parsed = parse_claude_oauth_usage(&usage);
+
+        assert_eq!(parsed.session_pct, 17.5);
+        assert!(parsed.session_resets_at.is_some());
+        assert_eq!(parsed.weekly_pct, 42.25);
+        assert!(parsed.weekly_resets_at.is_some());
+    }
+
+    #[test]
+    fn picks_largest_split_weekly_claude_oauth_window() {
+        let usage = serde_json::json!({
+            "five_hour": { "utilization": 1.0 },
+            "seven_day_opus": { "utilization": 55.0, "resets_at": "2026-04-28T12:34:56Z" },
+            "seven_day_sonnet": { "utilization": 72.0, "resets_at": "2026-04-29T12:34:56Z" }
+        });
+
+        let parsed = parse_claude_oauth_usage(&usage);
+
+        assert_eq!(parsed.weekly_pct, 72.0);
     }
 }

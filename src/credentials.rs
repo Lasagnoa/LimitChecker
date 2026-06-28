@@ -1,6 +1,9 @@
 use serde::Deserialize;
+use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Debug, Deserialize)]
 struct ClaudeCredentialsFile {
@@ -187,6 +190,7 @@ fn wsl_credential_paths(config_dir: &str, file_name: &str) -> Vec<PathBuf> {
 fn refresh_claude_token_via_cli() -> bool {
     std::process::Command::new("claude")
         .args(["-p", "say hi", "--max-turns", "1"])
+        .creation_flags(CREATE_NO_WINDOW)
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)

@@ -50,7 +50,8 @@ Codex
 
 ### Claude
 
-Claude は Claude Code の OAuth/Bearer token を使い、Messages API のレスポンスヘッダーから 5時間枠と 7日枠の使用率を読みます。
+Claude は Claude Code の OAuth/Bearer token を使い、まず Claude Code OAuth 使用量 API から 5時間枠と 7日枠の使用率を読みます。
+OAuth 使用量 API が失敗した場合のみ、従来どおり Messages API のレスポンスヘッダーからの取得にフォールバックします。
 
 認証情報は Claude Code の現行仕様に近い順序で確認します。
 
@@ -71,7 +72,27 @@ Claude は Claude Code の OAuth/Bearer token を使い、Messages API のレス
 
 `ANTHROPIC_AUTH_TOKEN` と `CLAUDE_CODE_OAUTH_TOKEN` は、値が `Bearer xxx` 形式でも `xxx` 形式でも扱えます。
 
-Claude使用量取得リクエスト:
+Claude OAuth 使用量取得リクエスト:
+
+| 項目 | 内容 |
+| --- | --- |
+| URL | `https://api.anthropic.com/api/oauth/usage` |
+| 認証 | `Authorization: Bearer <token>` |
+| Beta | `anthropic-beta: oauth-2025-04-20` |
+
+使用する主なJSON項目:
+
+| JSONパス | 意味 |
+| --- | --- |
+| `/five_hour/utilization` | 5時間枠の使用率。値はパーセント |
+| `/five_hour/resets_at` | 5時間枠のリセット時刻 |
+| `/seven_day/utilization` | 7日枠の使用率。値はパーセント |
+| `/seven_day/resets_at` | 7日枠のリセット時刻 |
+
+`seven_day` がない場合は、`seven_day_opus` / `seven_day_sonnet` / `seven_day_haiku` / `seven_day_oauth_apps` のうち使用率が最大のものを7日枠として表示します。
+reset時刻は Unix epoch 秒と RFC3339 の両方を読めます。
+
+Messages API フォールバック取得リクエスト:
 
 | 項目 | 内容 |
 | --- | --- |
