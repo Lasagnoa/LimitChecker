@@ -32,10 +32,14 @@ const IDM_OPEN_CLAUDE: u32 = 1020;
 const IDM_OPEN_CODEX: u32 = 1021;
 // デバッグログ ON/OFF
 const IDM_LOG_TOGGLE: u32 = 1060;
+// status.json 書き出し ON/OFF
+const IDM_STATUS_JSON_TOGGLE: u32 = 1061;
 
 static POPUP_VISIBLE: AtomicBool = AtomicBool::new(false);
 static POPUP_PINNED: AtomicBool = AtomicBool::new(false);
 pub static LOG_ENABLED: AtomicBool = AtomicBool::new(false);
+/// status.json をポーリングのたびに書き出すかどうか (右クリックメニューでトグル)
+pub static STATUS_JSON_ENABLED: AtomicBool = AtomicBool::new(true);
 static MAIN_HWND: AtomicUsize = AtomicUsize::new(0);
 static TASKBAR_CREATED_MSG: AtomicU32 = AtomicU32::new(0);
 static LAST_TRAY_MOUSEMOVE_MS: AtomicU64 = AtomicU64::new(0);
@@ -120,6 +124,7 @@ enum TextId {
     LoginClaude,
     LoginCodex,
     DebugLog,
+    StatusJsonOutput,
     Exit,
     LoginRequired,
     Reset,
@@ -149,6 +154,7 @@ fn tr(id: TextId) -> &'static str {
             TextId::LoginClaude => "Claude再ログイン",
             TextId::LoginCodex => "Codex再ログイン",
             TextId::DebugLog => "ログ(デバッグ用)",
+            TextId::StatusJsonOutput => "status.json を出力",
             TextId::Exit => "終了",
             TextId::LoginRequired => "ログインが必要です",
             TextId::Reset => "リセット",
@@ -165,6 +171,7 @@ fn tr(id: TextId) -> &'static str {
             TextId::LoginClaude => "Log in to Claude again",
             TextId::LoginCodex => "Log in to Codex again",
             TextId::DebugLog => "Log (debug)",
+            TextId::StatusJsonOutput => "Write status.json",
             TextId::Exit => "Exit",
             TextId::LoginRequired => "Login required",
             TextId::Reset => "Reset",
@@ -196,13 +203,18 @@ fn now_ms() -> u64 {
 }
 
 /// --once モード: 親プロセスのコンソールにアタッチして1回だけポーリングし、JSONを標準出力に書く。
-/// status.json も poll_once 内で更新される。
+/// status.json への書き出しは設定 (status_json_enabled) に従う。標準出力は常に書く。
 fn run_once_and_exit() {
     // windows subsystem ビルドでも、PowerShell/cmd から呼ばれた時に標準出力を見えるようにする。
-    // 親にコンソールがない (例: ダブルクリック) 場合は失敗するが、その場合は status.json への書き出しが主目的なので無視。
+    // 親にコンソールがない (例: ダブルクリック) 場合は失敗するが、その場合でも標準出力先がないだけ。
     unsafe {
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
+
+    // --once でも常駐側と同じ設定を尊重する
+    let s = settings::load();
+    LOG_ENABLED.store(s.log_enabled, Ordering::SeqCst);
+    STATUS_JSON_ENABLED.store(s.status_json_enabled, Ordering::SeqCst);
 
     let shared = poller::create_shared_info();
     poller::poll_once(&shared);
@@ -219,6 +231,7 @@ fn save_current_settings() {
     let s = settings::Settings {
         poll_interval_ms: app().poll_interval_ms,
         log_enabled: LOG_ENABLED.load(Ordering::SeqCst),
+        status_json_enabled: STATUS_JSON_ENABLED.load(Ordering::SeqCst),
     };
     settings::save(&s);
 }
@@ -244,6 +257,7 @@ fn main() {
     // 設定ファイルのロード
     let s = settings::load();
     LOG_ENABLED.store(s.log_enabled, Ordering::SeqCst);
+    STATUS_JSON_ENABLED.store(s.status_json_enabled, Ordering::SeqCst);
 
     let shared_info = poller::create_shared_info();
 
@@ -591,6 +605,18 @@ unsafe fn show_context_menu(hwnd: HWND) {
         IDM_LOG_TOGGLE as usize,
         to_wide(tr(TextId::DebugLog)).as_ptr(),
     );
+    // status.json 書き出し ON/OFF
+    let status_json_flag = if STATUS_JSON_ENABLED.load(Ordering::SeqCst) {
+        MF_STRING | MF_CHECKED
+    } else {
+        MF_STRING
+    };
+    AppendMenuW(
+        hmenu,
+        status_json_flag,
+        IDM_STATUS_JSON_TOGGLE as usize,
+        to_wide(tr(TextId::StatusJsonOutput)).as_ptr(),
+    );
     AppendMenuW(hmenu, MF_SEPARATOR, 0, std::ptr::null());
     AppendMenuW(
         hmenu,
@@ -702,6 +728,20 @@ unsafe extern "system" fn wnd_proc(
                 IDM_LOG_TOGGLE => {
                     let current = LOG_ENABLED.load(Ordering::SeqCst);
                     LOG_ENABLED.store(!current, Ordering::SeqCst);
+                    save_current_settings();
+                }
+                // status.json 書き出しのON/OFFをトグル
+                // OFFに切り替えた時は既存のstatus.jsonを掃除する (古い値が残らないように)
+                IDM_STATUS_JSON_TOGGLE => {
+                    let current = STATUS_JSON_ENABLED.load(Ordering::SeqCst);
+                    let next = !current;
+                    STATUS_JSON_ENABLED.store(next, Ordering::SeqCst);
+                    if !next {
+                        poller::delete_status_file();
+                    } else {
+                        // ONに戻した時は即座に最新値で書き出す
+                        do_refresh();
+                    }
                     save_current_settings();
                 }
                 _ => {}

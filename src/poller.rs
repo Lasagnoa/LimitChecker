@@ -172,8 +172,13 @@ pub fn build_status_json(info: &UsageInfo) -> String {
     serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// ポーリング後に status.json をディスクへ書き出す
+/// ポーリング後に status.json をディスクへ書き出す。
+/// `STATUS_JSON_ENABLED` が false の場合は何もしない (ユーザー設定で出力OFF)。
 fn write_status_file(info: &UsageInfo) {
+    if !crate::STATUS_JSON_ENABLED.load(std::sync::atomic::Ordering::Relaxed) {
+        write_log("status.json write skipped (disabled by user)");
+        return;
+    }
     let Some(path) = status_file_path() else {
         write_log("status file path unavailable (APPDATA not set)");
         return;
@@ -185,6 +190,18 @@ fn write_status_file(info: &UsageInfo) {
     match std::fs::write(&path, &data) {
         Ok(_) => write_log(&format!("status.json written: {}", path.display())),
         Err(e) => write_log(&format!("status.json write failed: {}", e)),
+    }
+}
+
+/// status.json を削除する。設定OFF切替時に既存ファイルを掃除する用。
+/// 存在しない場合や削除失敗は無視する。
+pub fn delete_status_file() {
+    if let Some(path) = status_file_path() {
+        match std::fs::remove_file(&path) {
+            Ok(_) => write_log(&format!("status.json removed: {}", path.display())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => write_log(&format!("status.json remove failed: {}", e)),
+        }
     }
 }
 

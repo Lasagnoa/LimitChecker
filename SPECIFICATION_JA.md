@@ -167,6 +167,7 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 | Claude再ログイン | `claude auth login` を実行 |
 | Codex再ログイン | `codex login` を実行 |
 | ログ(デバッグ用) | `limitchecker.log` 出力のON/OFF |
+| status.json を出力 | `status.json` 書き出しのON/OFF |
 | 終了 | アプリを終了 |
 
 ## 設定仕様
@@ -177,6 +178,7 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 | --- | --- |
 | `poll_interval_ms` | 更新間隔 |
 | `log_enabled` | デバッグログON/OFF |
+| `status_json_enabled` | status.json 書き出しON/OFF (デフォルト: ON) |
 
 ## 状態ファイル仕様 (status.json)
 
@@ -199,6 +201,8 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 | `codex.weekly_resets_at` | string \| null | 7日枠のリセット時刻 |
 
 書き出しは `poll_once` の最後で行います。書き出し失敗はログにのみ出ます。
+
+右クリックメニューの「status.json を出力」でON/OFF を切り替えられます。OFF にした時は既存の `status.json` を削除します。ON に戻した時は即時にポーリングを走らせて最新値で書き直します。`--once` も `status_json_enabled` に従いますが、標準出力への JSON は設定に関わらず常に出力します。
 
 ## サブコマンド仕様
 

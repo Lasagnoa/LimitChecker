@@ -90,6 +90,7 @@ target\release\LimitChecker.exe
 | Claude再ログイン | `claude auth login` を実行 |
 | Codex再ログイン | `codex login` を実行 |
 | ログ(デバッグ用) | `limitchecker.log` 出力のON/OFF |
+| status.json を出力 | `status.json` 書き出しのON/OFF |
 | 終了 | アプリを終了 |
 
 ### 設定ファイル
@@ -228,6 +229,7 @@ target\release\LimitChecker.exe
 | Claude Re-login | Execute `claude auth login` |
 | Codex Re-login | Execute `codex login` |
 | Log (Debug) | Toggle `limitchecker.log` output |
+| Write status.json | Toggle `status.json` output |
 | Exit | Exit the application |
 
 ### Settings File

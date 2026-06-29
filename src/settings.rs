@@ -4,6 +4,11 @@ use std::path::PathBuf;
 // デフォルト値定数
 const DEFAULT_POLL_MS: u32 = 60_000; // デフォルト更新間隔: 1分
 const DEFAULT_LOG_ENABLED: bool = false; // デバッグログ: OFF
+const DEFAULT_STATUS_JSON_ENABLED: bool = true; // status.json 書き出し: ON
+
+fn default_status_json_enabled() -> bool {
+    DEFAULT_STATUS_JSON_ENABLED
+}
 
 /// アプリケーション設定
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +18,9 @@ pub struct Settings {
     /// デバッグログ出力ON/OFF
     #[serde(default)]
     pub log_enabled: bool,
+    /// status.json 書き出しON/OFF
+    #[serde(default = "default_status_json_enabled")]
+    pub status_json_enabled: bool,
 }
 
 impl Default for Settings {
@@ -20,6 +28,7 @@ impl Default for Settings {
         Self {
             poll_interval_ms: DEFAULT_POLL_MS,
             log_enabled: DEFAULT_LOG_ENABLED,
+            status_json_enabled: DEFAULT_STATUS_JSON_ENABLED,
         }
     }
 }
