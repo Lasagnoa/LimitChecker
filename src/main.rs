@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use windows_sys::Win32::Foundation::*;
 use windows_sys::Win32::Globalization::GetUserDefaultUILanguage;
 use windows_sys::Win32::Graphics::Gdi::*;
+use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::*;
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -194,6 +195,25 @@ fn now_ms() -> u64 {
         .as_millis() as u64
 }
 
+/// --once モード: 親プロセスのコンソールにアタッチして1回だけポーリングし、JSONを標準出力に書く。
+/// status.json も poll_once 内で更新される。
+fn run_once_and_exit() {
+    // windows subsystem ビルドでも、PowerShell/cmd から呼ばれた時に標準出力を見えるようにする。
+    // 親にコンソールがない (例: ダブルクリック) 場合は失敗するが、その場合は status.json への書き出しが主目的なので無視。
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+    }
+
+    let shared = poller::create_shared_info();
+    poller::poll_once(&shared);
+
+    let json = {
+        let info = shared.lock().unwrap();
+        poller::build_status_json(&info)
+    };
+    println!("{}", json);
+}
+
 /// 現在のアプリ設定をファイルに保存する
 fn save_current_settings() {
     let s = settings::Settings {
@@ -204,6 +224,13 @@ fn save_current_settings() {
 }
 
 fn main() {
+    // --once: 1回だけ使用量を取得して JSON を標準出力に表示し終了する。
+    // status.json も同時に更新する。常駐インスタンスと同居して動作可能。
+    if std::env::args().skip(1).any(|a| a == "--once") {
+        run_once_and_exit();
+        return;
+    }
+
     // 多重起動防止: 同じウィンドウクラスが既に存在する場合は終了
     unsafe {
         let class_name = to_wide("LimitCheckerClass");

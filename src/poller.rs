@@ -1,9 +1,11 @@
 use crate::credentials;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProviderUsage {
     pub session_pct: f64,
     pub session_resets_at: Option<DateTime<Utc>>,
@@ -22,7 +24,7 @@ impl Default for ProviderUsage {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UsageInfo {
     pub claude: ProviderUsage,
     /// Claude のトークンが見つかり使用率取得が可能かどうか
@@ -30,6 +32,21 @@ pub struct UsageInfo {
     pub codex: ProviderUsage,
     /// Codex のトークンが見つかり使用率取得が可能かどうか
     pub codex_configured: bool,
+}
+
+/// 外部ツール(AI等)向けの状態ファイルJSON
+#[derive(Serialize)]
+struct StatusFile<'a> {
+    /// このファイルが書かれた時刻 (RFC3339, ローカルTZ付き)
+    updated_at: String,
+    /// スキーマバージョン。フォーマット変更時にインクリメント
+    schema_version: u32,
+    /// LimitChecker 自身のバージョン
+    app_version: &'static str,
+    claude_configured: bool,
+    claude: &'a ProviderUsage,
+    codex_configured: bool,
+    codex: &'a ProviderUsage,
 }
 
 impl Default for UsageInfo {
@@ -120,11 +137,55 @@ pub fn poll_once(shared: &SharedUsageInfo) {
         }
     };
 
-    let mut info = shared.lock().unwrap();
-    info.claude = claude;
-    info.claude_configured = claude_configured;
-    info.codex = codex;
-    info.codex_configured = codex_configured;
+    let snapshot = {
+        let mut info = shared.lock().unwrap();
+        info.claude = claude;
+        info.claude_configured = claude_configured;
+        info.codex = codex;
+        info.codex_configured = codex_configured;
+        info.clone()
+    };
+
+    write_status_file(&snapshot);
+}
+
+/// 外部からも参照できる status.json のパス (%APPDATA%\LimitChecker\status.json)
+pub fn status_file_path() -> Option<PathBuf> {
+    std::env::var("APPDATA").ok().map(|appdata| {
+        PathBuf::from(appdata)
+            .join("LimitChecker")
+            .join("status.json")
+    })
+}
+
+/// UsageInfo を status.json 形式の文字列にシリアライズする
+pub fn build_status_json(info: &UsageInfo) -> String {
+    let status = StatusFile {
+        updated_at: chrono::Local::now().to_rfc3339(),
+        schema_version: 1,
+        app_version: env!("CARGO_PKG_VERSION"),
+        claude_configured: info.claude_configured,
+        claude: &info.claude,
+        codex_configured: info.codex_configured,
+        codex: &info.codex,
+    };
+    serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// ポーリング後に status.json をディスクへ書き出す
+fn write_status_file(info: &UsageInfo) {
+    let Some(path) = status_file_path() else {
+        write_log("status file path unavailable (APPDATA not set)");
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let data = build_status_json(info);
+    match std::fs::write(&path, &data) {
+        Ok(_) => write_log(&format!("status.json written: {}", path.display())),
+        Err(e) => write_log(&format!("status.json write failed: {}", e)),
+    }
 }
 
 fn fetch_claude_usage(

@@ -178,6 +178,37 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 | `poll_interval_ms` | 更新間隔 |
 | `log_enabled` | デバッグログON/OFF |
 
+## 状態ファイル仕様 (status.json)
+
+外部ツール (AIアシスタント等) から現在のレートリミット状況を読み取れるよう、ポーリングが完了するたびに `%APPDATA%\LimitChecker\status.json` を上書きします。
+
+| 項目 | 型 | 意味 |
+| --- | --- | --- |
+| `updated_at` | string (RFC3339, ローカルTZ付き) | このファイルが書かれた時刻 |
+| `schema_version` | number | スキーマバージョン。フォーマット変更時にインクリメント |
+| `app_version` | string | LimitChecker のバージョン |
+| `claude_configured` | bool | Claude のトークンが見つかったか |
+| `claude.session_pct` | number | 5時間枠の使用率 (0〜100) |
+| `claude.session_resets_at` | string \| null | 5時間枠のリセット時刻 (RFC3339, UTC) |
+| `claude.weekly_pct` | number | 7日枠の使用率 |
+| `claude.weekly_resets_at` | string \| null | 7日枠のリセット時刻 |
+| `codex_configured` | bool | Codex のトークンが見つかったか |
+| `codex.session_pct` | number | 5時間枠の使用率 |
+| `codex.session_resets_at` | string \| null | 5時間枠のリセット時刻 |
+| `codex.weekly_pct` | number | 7日枠の使用率 |
+| `codex.weekly_resets_at` | string \| null | 7日枠のリセット時刻 |
+
+書き出しは `poll_once` の最後で行います。書き出し失敗はログにのみ出ます。
+
+## サブコマンド仕様
+
+| サブコマンド | 動作 |
+| --- | --- |
+| (引数なし) | 通常のタスクトレイ常駐モード |
+| `--once` | 1回だけ使用量を取得して `status.json` を更新し、同じ JSON を標準出力にも書き出して終了する。常駐インスタンスと並行して呼んでも問題なし |
+
+`--once` は `#![windows_subsystem = "windows"]` ビルドでも、PowerShell/cmd から呼ばれた場合は `AttachConsole(ATTACH_PARENT_PROCESS)` で親コンソールに接続して結果を表示します。GUI からダブルクリックで起動された場合は標準出力先がないため、結果は `status.json` への書き出しのみになります。
+
 ## モジュール構成
 
 | ファイル | 役割 |

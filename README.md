@@ -100,6 +100,22 @@ target\release\LimitChecker.exe
 %APPDATA%\LimitChecker\settings.json
 ```
 
+### 状態ファイル (status.json) / 外部連携
+
+ポーリングが完了するたびに次のパスに使用率を書き出します。AIアシスタント等の外部ツールから現在のレート状況を読みたい時に使ってください。
+
+```
+%APPDATA%\LimitChecker\status.json
+```
+
+即時取得用のサブコマンド:
+
+```powershell
+LimitChecker.exe --once
+```
+
+`--once` は常駐インスタンスと同居して動作し、その場で1回 Claude / Codex の使用率を取得して `status.json` を更新し、同じ JSON を標準出力にも書き出します。詳細スキーマは [SPECIFICATION_JA.md](SPECIFICATION_JA.md) を参照してください。
+
 ## トラブルシューティング
 
 **使用率が 0% または表示されない場合:**
