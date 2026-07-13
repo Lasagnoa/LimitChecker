@@ -4,7 +4,7 @@
 
 Limit Checker は、Claude と Codex のレートリミット使用状況を Windows のタスクトレイから確認するデスクトップアプリケーションです。
 
-トレイアイコンにマウスを重ねる、または左クリックすると小さなポップアップを表示し、Claude と Codex それぞれの 5時間枠と 7日枠の使用率、リセットまでの時間を確認できます。
+トレイアイコンにマウスを重ねる、または左クリックすると小さなポップアップを表示し、Claude と Codex の利用可能なリミット窓の使用率、リセットまでの時間を確認できます。Codexは一時的に5時間窓がAPIから返らず週間窓だけになる場合があるため、存在する窓だけを表示します。
 
 ## 対象環境
 
@@ -30,10 +30,10 @@ Claude
     リセットまでの時間 ( Reset : ローカル日時 )
 
 Codex
-5H  [使用率バー]  xx%
-    リセットまでの時間 ( Reset : ローカル日時 )
 7D  [使用率バー]  xx%
     リセットまでの時間 ( Reset : ローカル日時 )
+
+※ Codexの5時間窓がAPIに返る場合は、7Dの前に5Hも表示します。
 ```
 
 ### 色
@@ -133,17 +133,18 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 3. `tokens.access_token` を使用する
 4. `https://chatgpt.com/backend-api/wham/usage` を直接呼び出す
 5. JSONレスポンスの `rate_limit.primary_window` と `rate_limit.secondary_window` を使用する
+6. 各窓の `limit_window_seconds` で5時間窓 (`18000`) と週間窓 (`604800`) を判定する
 
 使用する主なJSON項目:
 
 | JSONパス | 意味 |
 | --- | --- |
-| `/rate_limit/primary_window/used_percent` | 5時間枠の使用率 |
-| `/rate_limit/primary_window/reset_at` | 5時間枠のリセット時刻 |
-| `/rate_limit/primary_window/reset_after_seconds` | 5時間枠のリセットまでの秒数 |
-| `/rate_limit/secondary_window/used_percent` | 7日枠の使用率 |
-| `/rate_limit/secondary_window/reset_at` | 7日枠のリセット時刻 |
-| `/rate_limit/secondary_window/reset_after_seconds` | 7日枠のリセットまでの秒数 |
+| `/rate_limit/*_window/used_percent` | その窓の使用率 |
+| `/rate_limit/*_window/limit_window_seconds` | 窓の長さ。`18000` は5時間、`604800` は週間 |
+| `/rate_limit/*_window/reset_at` | その窓のリセット時刻 |
+| `/rate_limit/*_window/reset_after_seconds` | その窓のリセットまでの秒数 |
+
+`primary_window` / `secondary_window` のフィールド名は固定の表示対象とはみなしません。特別措置中に5時間窓がなく、`primary_window` が週間窓で `secondary_window` が `null` になるレスポンスでは、5Hを非表示にして週間窓だけを表示します。5時間窓が復活して両方の窓が返れば、5Hと7Dを自動的に表示します。
 
 `OPENAI_API_KEY` や `codex login --with-api-key` で使うAPIキー認証では、現在のChatGPT/Codex使用量APIは取得対象外です。
 
@@ -190,17 +191,21 @@ Codex は Codex CLI の ChatGPTログイン用 OAuth token を使います。
 | `schema_version` | number | スキーマバージョン。フォーマット変更時にインクリメント |
 | `app_version` | string | LimitChecker のバージョン |
 | `claude_configured` | bool | Claude のトークンが見つかったか |
+| `claude.session_available` | bool | 5時間枠がレスポンスに存在するか |
 | `claude.session_pct` | number | 5時間枠の使用率 (0〜100) |
 | `claude.session_resets_at` | string \| null | 5時間枠のリセット時刻 (RFC3339, UTC) |
+| `claude.weekly_available` | bool | 週間枠がレスポンスに存在するか |
 | `claude.weekly_pct` | number | 7日枠の使用率 |
 | `claude.weekly_resets_at` | string \| null | 7日枠のリセット時刻 |
 | `codex_configured` | bool | Codex のトークンが見つかったか |
+| `codex.session_available` | bool | 5時間枠がレスポンスに存在するか。falseの場合はsession_pctを表示対象にしない |
 | `codex.session_pct` | number | 5時間枠の使用率 |
 | `codex.session_resets_at` | string \| null | 5時間枠のリセット時刻 |
+| `codex.weekly_available` | bool | 週間枠がレスポンスに存在するか |
 | `codex.weekly_pct` | number | 7日枠の使用率 |
 | `codex.weekly_resets_at` | string \| null | 7日枠のリセット時刻 |
 
-書き出しは `poll_once` の最後で行います。書き出し失敗はログにのみ出ます。
+`schema_version` は2です。利用できない窓の使用率は互換性のため `0` を保持しますが、`*_available` が `false` の窓は表示・判定対象にしません。書き出しは `poll_once` の最後で行います。書き出し失敗はログにのみ出ます。
 
 右クリックメニューの「status.json を出力」でON/OFF を切り替えられます。OFF にした時は既存の `status.json` を削除します。ON に戻した時は即時にポーリングを走らせて最新値で書き直します。`--once` も `status_json_enabled` に従いますが、標準出力への JSON は設定に関わらず常に出力します。
 

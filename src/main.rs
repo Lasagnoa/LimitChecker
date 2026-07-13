@@ -399,20 +399,44 @@ unsafe fn remove_tray_icon(hwnd: HWND) {
     Shell_NotifyIconW(NIM_DELETE, &nid);
 }
 
-/// 1プロバイダー分のセクション高さ (タイトル + 5H行 + 7D行)
-fn provider_section_h() -> i32 {
-    TITLE_ROW_H
-        + TITLE_BAR_GAP
-        + (BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H)
-        + BLOCK_GAP
-        + (BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H)
+/// 1リミット窓分の行高さ (バー + リセット詳細)
+fn window_row_h() -> i32 {
+    BAR_ROW_H + BAR_DETAIL_GAP + DETAIL_ROW_H
+}
+
+/// 1プロバイダー分のセクション高さ。APIに存在する窓だけを数える。
+fn provider_section_h(usage: &poller::ProviderUsage) -> i32 {
+    let session_h = if usage.session_available {
+        window_row_h()
+    } else {
+        0
+    };
+    let weekly_h = if usage.weekly_available {
+        window_row_h()
+    } else {
+        0
+    };
+    let window_gap = if usage.session_available && usage.weekly_available {
+        BLOCK_GAP
+    } else {
+        0
+    };
+
+    TITLE_ROW_H + TITLE_BAR_GAP + session_h + window_gap + weekly_h
 }
 
 /// 設定済みプロバイダーの数に応じてポップアップ高さを計算する
 fn calc_popup_height(info: &UsageInfo) -> i32 {
-    let sec_h = provider_section_h();
-    let claude_h = if info.claude_configured { sec_h } else { 0 };
-    let codex_h = if info.codex_configured { sec_h } else { 0 };
+    let claude_h = if info.claude_configured {
+        provider_section_h(&info.claude)
+    } else {
+        0
+    };
+    let codex_h = if info.codex_configured {
+        provider_section_h(&info.codex)
+    } else {
+        0
+    };
     // 両方表示する場合はセクション間に BLOCK_GAP を追加
     let gap = if info.claude_configured && info.codex_configured {
         BLOCK_GAP
@@ -966,33 +990,40 @@ unsafe extern "system" fn popup_wnd_proc(
                 draw_title_row(hdc, cy, "Claude", COL_CLAUDE, title_font);
                 cy += TITLE_ROW_H + TITLE_BAR_GAP;
 
-                draw_bar_row(
-                    hdc,
-                    cy,
-                    "5H",
-                    info_clone.claude.session_pct,
-                    COL_CLAUDE,
-                    bold_font,
-                );
-                cy += BAR_ROW_H + BAR_DETAIL_GAP;
-                if let Some(ref reset) = info_clone.claude.session_resets_at {
-                    draw_detail_row(hdc, cy, reset, detail_font);
+                if info_clone.claude.session_available {
+                    draw_bar_row(
+                        hdc,
+                        cy,
+                        "5H",
+                        info_clone.claude.session_pct,
+                        COL_CLAUDE,
+                        bold_font,
+                    );
+                    cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                    if let Some(ref reset) = info_clone.claude.session_resets_at {
+                        draw_detail_row(hdc, cy, reset, detail_font);
+                    }
+                    cy += DETAIL_ROW_H;
                 }
-                cy += DETAIL_ROW_H + BLOCK_GAP;
+                if info_clone.claude.session_available && info_clone.claude.weekly_available {
+                    cy += BLOCK_GAP;
+                }
 
-                draw_bar_row(
-                    hdc,
-                    cy,
-                    "7D",
-                    info_clone.claude.weekly_pct,
-                    COL_CLAUDE,
-                    bold_font,
-                );
-                cy += BAR_ROW_H + BAR_DETAIL_GAP;
-                if let Some(ref reset) = info_clone.claude.weekly_resets_at {
-                    draw_detail_row(hdc, cy, reset, detail_font);
+                if info_clone.claude.weekly_available {
+                    draw_bar_row(
+                        hdc,
+                        cy,
+                        "7D",
+                        info_clone.claude.weekly_pct,
+                        COL_CLAUDE,
+                        bold_font,
+                    );
+                    cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                    if let Some(ref reset) = info_clone.claude.weekly_resets_at {
+                        draw_detail_row(hdc, cy, reset, detail_font);
+                    }
+                    cy += DETAIL_ROW_H;
                 }
-                cy += DETAIL_ROW_H;
 
                 // Codex も表示する場合はセクション間ギャップを追加
                 if info_clone.codex_configured {
@@ -1005,31 +1036,39 @@ unsafe extern "system" fn popup_wnd_proc(
                 draw_title_row(hdc, cy, "Codex", COL_CODEX, title_font);
                 cy += TITLE_ROW_H + TITLE_BAR_GAP;
 
-                draw_bar_row(
-                    hdc,
-                    cy,
-                    "5H",
-                    info_clone.codex.session_pct,
-                    COL_CODEX,
-                    bold_font,
-                );
-                cy += BAR_ROW_H + BAR_DETAIL_GAP;
-                if let Some(ref reset) = info_clone.codex.session_resets_at {
-                    draw_detail_row(hdc, cy, reset, detail_font);
+                if info_clone.codex.session_available {
+                    draw_bar_row(
+                        hdc,
+                        cy,
+                        "5H",
+                        info_clone.codex.session_pct,
+                        COL_CODEX,
+                        bold_font,
+                    );
+                    cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                    if let Some(ref reset) = info_clone.codex.session_resets_at {
+                        draw_detail_row(hdc, cy, reset, detail_font);
+                    }
+                    cy += DETAIL_ROW_H;
                 }
-                cy += DETAIL_ROW_H + BLOCK_GAP;
+                if info_clone.codex.session_available && info_clone.codex.weekly_available {
+                    cy += BLOCK_GAP;
+                }
 
-                draw_bar_row(
-                    hdc,
-                    cy,
-                    "7D",
-                    info_clone.codex.weekly_pct,
-                    COL_CODEX,
-                    bold_font,
-                );
-                cy += BAR_ROW_H + BAR_DETAIL_GAP;
-                if let Some(ref reset) = info_clone.codex.weekly_resets_at {
-                    draw_detail_row(hdc, cy, reset, detail_font);
+                if info_clone.codex.weekly_available {
+                    draw_bar_row(
+                        hdc,
+                        cy,
+                        "7D",
+                        info_clone.codex.weekly_pct,
+                        COL_CODEX,
+                        bold_font,
+                    );
+                    cy += BAR_ROW_H + BAR_DETAIL_GAP;
+                    if let Some(ref reset) = info_clone.codex.weekly_resets_at {
+                        draw_detail_row(hdc, cy, reset, detail_font);
+                    }
+                    cy += DETAIL_ROW_H;
                 }
                 let _ = cy;
             }

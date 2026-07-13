@@ -11,6 +11,10 @@ pub struct ProviderUsage {
     pub session_resets_at: Option<DateTime<Utc>>,
     pub weekly_pct: f64,
     pub weekly_resets_at: Option<DateTime<Utc>>,
+    /// そのリミット窓がAPIレスポンスに存在するか。
+    /// Codexは一時的に5時間窓が返らないため、0%とは区別して保持する。
+    pub session_available: bool,
+    pub weekly_available: bool,
 }
 
 impl Default for ProviderUsage {
@@ -20,6 +24,8 @@ impl Default for ProviderUsage {
             session_resets_at: None,
             weekly_pct: 0.0,
             weekly_resets_at: None,
+            session_available: true,
+            weekly_available: true,
         }
     }
 }
@@ -162,7 +168,7 @@ pub fn status_file_path() -> Option<PathBuf> {
 pub fn build_status_json(info: &UsageInfo) -> String {
     let status = StatusFile {
         updated_at: chrono::Local::now().to_rfc3339(),
-        schema_version: 1,
+        schema_version: 2,
         app_version: env!("CARGO_PKG_VERSION"),
         claude_configured: info.claude_configured,
         claude: &info.claude,
@@ -266,6 +272,8 @@ fn parse_claude_oauth_usage(usage: &serde_json::Value) -> ProviderUsage {
         session_resets_at: oauth_window_reset(session),
         weekly_pct: weekly.map_or(0.0, |(_, window)| oauth_window_pct(Some(window))),
         weekly_resets_at: weekly.and_then(|(_, window)| oauth_window_reset(Some(window))),
+        session_available: true,
+        weekly_available: true,
     }
 }
 
@@ -379,6 +387,8 @@ fn fetch_claude_messages_usage(
         session_resets_at: session_reset,
         weekly_pct,
         weekly_resets_at: weekly_reset,
+        session_available: true,
+        weekly_available: true,
     })
 }
 
@@ -408,16 +418,7 @@ fn fetch_codex_usage(
         .json::<serde_json::Value>()
         .map_err(|e| format!("Codex usage API JSON parse failed: {}", e))?;
 
-    let primary = usage.pointer("/rate_limit/primary_window");
-    let secondary = usage.pointer("/rate_limit/secondary_window");
-    let session_pct = primary
-        .and_then(|v| v.get("used_percent"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let weekly_pct = secondary
-        .and_then(|v| v.get("used_percent"))
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let parsed = parse_codex_usage(&usage);
 
     let account_name = usage
         .get("email")
@@ -433,14 +434,64 @@ fn fetch_codex_usage(
 
     write_log(&format!(
         "Codex usage fetched: 5h={:.1}%, weekly={:.1}%, account={}, plan={}",
-        session_pct, weekly_pct, account_name, plan
+        parsed.session_pct, parsed.weekly_pct, account_name, plan
     ));
 
-    Ok(ProviderUsage {
-        session_pct,
-        session_resets_at: parse_codex_reset(primary),
-        weekly_pct,
-        weekly_resets_at: parse_codex_reset(secondary),
+    Ok(parsed)
+}
+
+const CODEX_FIVE_HOUR_SECONDS: i64 = 5 * 60 * 60;
+const CODEX_WEEKLY_SECONDS: i64 = 7 * 24 * 60 * 60;
+
+/// Codexの窓は、特別措置中にprimary/secondaryの割り当てが変わる。
+/// フィールド名ではなく実際の窓長で5時間/週間を判定し、旧形式にもフォールバックする。
+fn parse_codex_usage(usage: &serde_json::Value) -> ProviderUsage {
+    let primary = usage.pointer("/rate_limit/primary_window");
+    let secondary = usage.pointer("/rate_limit/secondary_window");
+    let windows = [primary, secondary];
+    let has_window_length = windows
+        .iter()
+        .any(|window| codex_window_seconds(*window).is_some());
+
+    let session_window = windows
+        .iter()
+        .copied()
+        .find(|window| codex_window_seconds(*window) == Some(CODEX_FIVE_HOUR_SECONDS))
+        .flatten()
+        .or_else(|| (!has_window_length).then_some(primary).flatten());
+    let weekly_window = windows
+        .iter()
+        .copied()
+        .find(|window| codex_window_seconds(*window) == Some(CODEX_WEEKLY_SECONDS))
+        .flatten()
+        .or_else(|| (!has_window_length).then_some(secondary).flatten());
+
+    ProviderUsage {
+        session_pct: codex_used_percent(session_window),
+        session_resets_at: parse_codex_reset(session_window),
+        weekly_pct: codex_used_percent(weekly_window),
+        weekly_resets_at: parse_codex_reset(weekly_window),
+        session_available: session_window.is_some(),
+        weekly_available: weekly_window.is_some(),
+    }
+}
+
+fn codex_used_percent(window: Option<&serde_json::Value>) -> f64 {
+    window
+        .and_then(|v| v.get("used_percent").or_else(|| v.get("usedPercent")))
+        .and_then(|v| v.as_f64())
+        .filter(|v| v.is_finite())
+        .unwrap_or(0.0)
+        .max(0.0)
+}
+
+fn codex_window_seconds(window: Option<&serde_json::Value>) -> Option<i64> {
+    let value = window?.get("limit_window_seconds")?;
+    value.as_i64().or_else(|| {
+        value
+            .as_f64()
+            .filter(|v| v.is_finite())
+            .map(|v| v.round() as i64)
     })
 }
 
@@ -631,5 +682,53 @@ mod tests {
         let parsed = parse_claude_oauth_usage(&usage);
 
         assert_eq!(parsed.weekly_pct, 72.0);
+    }
+
+    #[test]
+    fn maps_special_codex_response_to_weekly_only() {
+        let usage = serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 28.0,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1784512825
+                },
+                "secondary_window": null
+            }
+        });
+
+        let parsed = parse_codex_usage(&usage);
+
+        assert!(!parsed.session_available);
+        assert_eq!(parsed.session_pct, 0.0);
+        assert!(parsed.session_resets_at.is_none());
+        assert!(parsed.weekly_available);
+        assert_eq!(parsed.weekly_pct, 28.0);
+        assert!(parsed.weekly_resets_at.is_some());
+    }
+
+    #[test]
+    fn maps_legacy_codex_response_to_five_hour_and_weekly() {
+        let usage = serde_json::json!({
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 12.0,
+                    "limit_window_seconds": 18000,
+                    "reset_at": 1784512825
+                },
+                "secondary_window": {
+                    "used_percent": 34.0,
+                    "limit_window_seconds": 604800,
+                    "reset_at": 1784944825
+                }
+            }
+        });
+
+        let parsed = parse_codex_usage(&usage);
+
+        assert!(parsed.session_available);
+        assert_eq!(parsed.session_pct, 12.0);
+        assert!(parsed.weekly_available);
+        assert_eq!(parsed.weekly_pct, 34.0);
     }
 }

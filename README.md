@@ -14,7 +14,7 @@ Claude Code と Codex CLI のレートリミット使用状況を Windows タス
 ## 機能
 
 - **Claude Code** の 5時間枠・7日枠のレートリミット使用率をリアルタイム表示
-- **Codex CLI** の 5時間枠・7日枠のレートリミット使用率をリアルタイム表示
+- **Codex CLI** の利用可能なレートリミット窓をリアルタイム表示（5時間窓が一時的にない場合は週間窓のみ。復活時は自動表示）
 - セグメント形式のビジュアルバーで使用率を直感的に把握
 - リセットまでの残り時間をローカル時刻で表示
 - 更新間隔を 1分 / 5分 / 15分 / 60分 から選択
@@ -153,7 +153,7 @@ Check the usage rate in a popup by hovering or left-clicking the tray icon.
 ## Features
 
 - Real-time display of Claude Code's 5-hour and 7-day rate limit usage
-- Real-time display of Codex CLI's 5-hour and 7-day rate limit usage
+- Real-time display of Codex CLI's available rate-limit windows (weekly-only periods are supported, and the 5-hour window returns automatically when available)
 - Intuitive visual bars in segment format to grasp usage rates easily
 - Displays remaining time until reset in local time
 - Selectable update intervals: 1 min / 5 min / 15 min / 60 min
